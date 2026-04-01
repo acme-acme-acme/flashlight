@@ -3,6 +3,7 @@ import { Measure, POLLING_INTERVAL, TestCaseResult } from "@perf-profiler/types"
 import { CPUReport } from "./src/sections/CPUReport";
 import { ReportSummary } from "./src/sections/ReportSummary/ReportSummary.component";
 import { RAMReport } from "./src/sections/RAMReport";
+import { TPNReport } from "./src/sections/TPNReport";
 import { Report as ReportModel } from "@perf-profiler/reporter";
 import styled from "@emotion/styled";
 import { FPSReport } from "./src/sections/FPSReport";
@@ -87,6 +88,12 @@ const Report = ({
                   <RAMReport results={averagedResults} />
                 </div>
                 <div className="h-10" />
+
+                <HideSectionIfUndefinedValueFound>
+                  <div className="mx-8 p-6 bg-dark-charcoal border border-gray-800 rounded-lg">
+                    <TPNReport results={averagedResults} />
+                  </div>
+                </HideSectionIfUndefinedValueFound>
               </>
             ) : null}
           </div>

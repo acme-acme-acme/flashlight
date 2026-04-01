@@ -2,6 +2,7 @@ import React from "react";
 import { AveragedTestCaseResult, NavigationEvent } from "@perf-profiler/types";
 import { Chart } from "../components/Charts/Chart";
 import { roundToDecimal } from "@perf-profiler/reporter";
+import { NoValueFound } from "./hideSectionForEmptyValue";
 
 const getBarColor = (duration: number): string => {
   if (duration < 200) return "#158000";
@@ -16,7 +17,7 @@ export const TPNReport = ({ results }: { results: AveragedTestCaseResult[] }) =>
   const events = collectEvents(results);
 
   if (events.length === 0) {
-    throw new Error("No TPN data");
+    throw new NoValueFound();
   }
 
   const series = [
