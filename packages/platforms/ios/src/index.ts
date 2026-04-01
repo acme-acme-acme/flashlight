@@ -143,15 +143,27 @@ export class IOSProfiler implements Profiler {
 
     return {
       stop: () => {
-        if (!this.xctraceRecorder) return;
+        if (!this.xctraceRecorder) {
+          Logger.warn("iOS Physical Device: no xctrace recorder to stop");
+          return;
+        }
 
-        Logger.info("iOS Physical Device: stopping xctrace recording and parsing trace...");
+        Logger.info("iOS Physical Device: stopping xctrace recording...");
         const tracePath = this.xctraceRecorder.stop();
+        Logger.info(`iOS Physical Device: trace saved to ${tracePath}`);
 
         // Parse the trace and emit all measures retroactively
+        Logger.info(`iOS Physical Device: parsing trace for bundle ID "${bundleId}"...`);
         try {
           const measures = parseTrace(tracePath, bundleId);
           Logger.info(`iOS Physical Device: parsed ${measures.length} measures from trace`);
+
+          if (measures.length === 0) {
+            Logger.warn(
+              `iOS Physical Device: no measures found for "${bundleId}". ` +
+                `The app name in the trace may differ. Check xctrace export output manually.`
+            );
+          }
 
           for (const measure of measures) {
             if (this.onMeasure) {
