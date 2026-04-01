@@ -15,7 +15,7 @@ import { IOSNavigationEventCollector, IOSDeviceType } from "./tpn/IOSNavigationE
 import { detectXCTraceDeviceId } from "./xctrace/XCTraceRecorder";
 import { parseTrace } from "./xctrace/XCTraceParser";
 
-const PHYSICAL_DEVICE_RECORDING_SECONDS = 30;
+const PHYSICAL_DEVICE_RECORDING_SECONDS = 10;
 
 const detectDeviceType = (): IOSDeviceType => {
   try {
