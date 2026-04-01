@@ -32,6 +32,7 @@ const NODE_PACKAGES = [
   "core/tpn",
   "commands/report",
   "plugins/navigation-tracker",
+  "platforms/ios",
 ];
 
 module.exports = {
