@@ -3,10 +3,19 @@ export interface CpuMeasure {
   perCore: { [core: number]: number };
 }
 
+export interface NavigationEvent {
+  from: string;
+  to: string;
+  startTime: number;
+  endTime: number;
+  duration: number;
+}
+
 export interface Measure {
   cpu: CpuMeasure;
   ram?: number;
   fps?: number;
+  tpn?: NavigationEvent[];
   time: number;
 }
 
