@@ -1,4 +1,4 @@
-import { parseSimulatorApps, parsePyideviceAppList } from "../detectBundleId";
+import { parseSimulatorApps, parseDevicectlApps } from "../detectBundleId";
 
 describe("parseSimulatorApps", () => {
   it("parses xcrun simctl listapps plist output and returns bundle IDs", () => {
@@ -38,24 +38,33 @@ describe("parseSimulatorApps", () => {
   });
 });
 
-describe("parsePyideviceAppList", () => {
-  it("parses pyidevice app list output", () => {
-    const output = `com.example.myapp
-com.example.otherapp`;
-    const result = parsePyideviceAppList(output);
-    expect(result).toEqual(["com.example.myapp", "com.example.otherapp"]);
-  });
-
-  it("filters empty lines", () => {
-    const output = `com.example.myapp
-
-com.example.otherapp
-`;
-    const result = parsePyideviceAppList(output);
-    expect(result).toEqual(["com.example.myapp", "com.example.otherapp"]);
+describe("parseDevicectlApps", () => {
+  it("parses devicectl app listing output", () => {
+    const output = `Apps installed:
+Name              Bundle Identifier      Version   Bundle Version
+---------------   --------------------   -------   --------------
+Clary             com.clary.so           1.8.0     74
+Clary (Dev)       com.clary.so.dev       1.9.0     1
+Clary (Preview)   com.clary.so.preview   1.9.0     1
+bcause            com.bcause.everyone    1.9       2`;
+    const result = parseDevicectlApps(output);
+    expect(result).toEqual([
+      "com.clary.so",
+      "com.clary.so.dev",
+      "com.clary.so.preview",
+      "com.bcause.everyone",
+    ]);
   });
 
   it("returns empty array for empty output", () => {
-    expect(parsePyideviceAppList("")).toEqual([]);
+    expect(parseDevicectlApps("")).toEqual([]);
+  });
+
+  it("returns empty array when no apps listed", () => {
+    const output = `Apps installed:
+Name   Bundle Identifier   Version   Bundle Version
+----   -----------------   -------   --------------`;
+    const result = parseDevicectlApps(output);
+    expect(result).toEqual([]);
   });
 });
