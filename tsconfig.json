@@ -26,6 +26,7 @@
     { "path": "./packages/commands/report" },
     { "path": "./packages/plugins/appium-test-cases" },
     { "path": "./packages/plugins/aws-device-farm" },
+    { "path": "./packages/plugins/navigation-tracker" },
     { "path": "./packages/commands/measure" },
     { "path": "./examples/cli" },
     { "path": "./examples/e2e" }
