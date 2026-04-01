@@ -139,6 +139,26 @@ export class IOSProfiler implements Profiler {
       `iOS Physical Device: metrics will appear after the ${duration}s recording completes.`
     );
 
+    // Emit TPN-only measures in real-time during recording so the UI shows navigation events
+    const allTpnEvents: import("@perf-profiler/types").NavigationEvent[] = [];
+    const tpnPollingInterval = setInterval(() => {
+      const tpnEvents = this.navigationCollector?.flush() ?? [];
+      if (tpnEvents.length > 0) {
+        allTpnEvents.push(...tpnEvents);
+        Logger.info(`iOS Physical Device: emitting ${tpnEvents.length} TPN events in real-time`);
+        const measure: Measure = {
+          cpu: { perName: { Total: 0 }, perCore: {} },
+          ram: 0,
+          fps: undefined,
+          time: Date.now(),
+          tpn: tpnEvents,
+        };
+        if (this.onMeasure) {
+          this.onMeasure(measure);
+        }
+      }
+    }, POLLING_INTERVAL);
+
     // Use async spawn with --time-limit so Node's event loop stays responsive
     // xctrace will exit cleanly when the time limit is reached, producing a valid trace
     this.xctraceProcess = spawn(
@@ -178,6 +198,13 @@ export class IOSProfiler implements Profiler {
     this.xctraceProcess.on("exit", (code) => {
       Logger.info(`xctrace: recording finished (exit code ${code})`);
       this.xctraceProcess = null;
+      clearInterval(tpnPollingInterval);
+
+      // Flush any remaining TPN events
+      const remainingTpn = this.navigationCollector?.flush() ?? [];
+      if (remainingTpn.length > 0) {
+        allTpnEvents.push(...remainingTpn);
+      }
 
       if (code !== 0) {
         Logger.error(`xctrace recording failed (exit code ${code})`);
@@ -197,12 +224,26 @@ export class IOSProfiler implements Profiler {
           );
         }
 
-        // Attach TPN events from Metro log collector to the first measure
-        const tpnEvents = this.navigationCollector?.flush() ?? [];
-        if (tpnEvents.length > 0) {
-          Logger.info(`iOS Physical Device: attaching ${tpnEvents.length} TPN events from Metro`);
-          if (measures.length > 0) {
-            measures[0].tpn = tpnEvents;
+        // Distribute collected TPN events across measures by timestamp
+        if (allTpnEvents.length > 0 && measures.length > 0) {
+          Logger.info(
+            `iOS Physical Device: distributing ${allTpnEvents.length} TPN events across ${measures.length} measures`
+          );
+          for (const tpnEvent of allTpnEvents) {
+            // Find the closest measure by time
+            let closestIdx = 0;
+            let closestDist = Infinity;
+            for (let i = 0; i < measures.length; i++) {
+              const dist = Math.abs(measures[i].time - tpnEvent.startTime);
+              if (dist < closestDist) {
+                closestDist = dist;
+                closestIdx = i;
+              }
+            }
+            if (!measures[closestIdx].tpn) {
+              measures[closestIdx].tpn = [];
+            }
+            measures[closestIdx].tpn!.push(tpnEvent);
           }
         }
 
@@ -222,6 +263,7 @@ export class IOSProfiler implements Profiler {
 
     return {
       stop: () => {
+        clearInterval(tpnPollingInterval);
         if (this.xctraceProcess) {
           Logger.info(
             `iOS Physical Device: recording still in progress (${duration}s total). ` +
