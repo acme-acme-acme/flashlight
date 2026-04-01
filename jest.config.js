@@ -33,6 +33,7 @@ const NODE_PACKAGES = [
   "commands/report",
   "plugins/navigation-tracker",
   "platforms/ios",
+  "platforms/profiler",
 ];
 
 module.exports = {

@@ -1,9 +1,11 @@
 import { AndroidProfiler, FlashlightSelfProfiler } from "@perf-profiler/android";
 import { IOSProfiler } from "@perf-profiler/ios";
 import { Profiler } from "@perf-profiler/types";
+import { detectPlatform } from "./detectPlatform";
 
 const getProfiler = (): Profiler => {
-  switch (process.env.PLATFORM) {
+  const platform = detectPlatform();
+  switch (platform) {
     case "ios":
       return new IOSProfiler();
     case "flashlight":
