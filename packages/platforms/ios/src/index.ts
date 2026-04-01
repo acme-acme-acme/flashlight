@@ -1,6 +1,8 @@
 import { Measure, Profiler, ProfilerPollingOptions, ScreenRecorder } from "@perf-profiler/types";
-import { ChildProcess, exec } from "child_process";
-import { killApp } from "@perf-profiler/ios-instruments";
+import { Logger } from "@perf-profiler/logger";
+import { ChildProcess, exec, execSync } from "child_process";
+import { detectIOSBundleId } from "./detectBundleId";
+import { IOSNavigationEventCollector, IOSDeviceType } from "./tpn/IOSNavigationEventCollector";
 
 interface AppMonitorData {
   Pid: number;
@@ -20,11 +22,29 @@ interface FPSData {
 
 type DataTypes = "cpu" | "fps";
 
+const detectDeviceType = (): IOSDeviceType => {
+  try {
+    const output = execSync("xcrun simctl list devices booted", { encoding: "utf-8" });
+    if (output.includes("Booted")) {
+      return "simulator";
+    }
+  } catch {
+    // xcrun not available or no booted simulator
+  }
+  return "device";
+};
+
 export class IOSProfiler implements Profiler {
   private measures: Record<string, Measure> = {};
   private lastFPS: FPSData | null = null;
   private lastCpu: AppMonitorData | null = null;
   private onMeasure: ((measure: Measure) => void) | undefined;
+  private navigationCollector: IOSNavigationEventCollector | null = null;
+  private deviceType: IOSDeviceType;
+
+  constructor() {
+    this.deviceType = detectDeviceType();
+  }
 
   parseData = async (childProcess: ChildProcess, type: DataTypes) => {
     childProcess?.stdout?.on("data", (childProcess: ChildProcess) => {
@@ -45,11 +65,18 @@ export class IOSProfiler implements Profiler {
       perName: { Total: parseFloat(lastCpu.CPU.replace(" %", "")) },
       perCore: {},
     };
+
+    const tpnEvents = this.navigationCollector?.flush() ?? [];
+    if (tpnEvents.length > 0) {
+      Logger.info(`iOS TPN flush: attaching ${tpnEvents.length} events to measure`);
+    }
+
     const measure: Measure = {
       cpu: cpuMeasure,
       ram: parseFloat(lastCpu.Memory.replace(" MiB", "")),
       fps: lastFps.fps,
       time: new Date(lastCpu.Time).getTime(),
+      ...(tpnEvents.length > 0 ? { tpn: tpnEvents } : {}),
     };
     this.measures[measure.time] = measure;
     if (this.onMeasure) {
@@ -67,6 +94,10 @@ export class IOSProfiler implements Profiler {
 
   pollPerformanceMeasures(bundleId: string, options: ProfilerPollingOptions): { stop: () => void } {
     this.onMeasure = options.onMeasure;
+
+    this.navigationCollector = new IOSNavigationEventCollector(this.deviceType);
+    this.navigationCollector.start();
+
     const cpuAndMemoryPolling = exec(
       `pyidevice instruments appmonitor --format=flush -b ${bundleId} --time 500`
     );
@@ -80,16 +111,18 @@ export class IOSProfiler implements Profiler {
       stop: () => {
         cpuAndMemoryPolling.kill();
         fpsPolling.kill();
+        this.navigationCollector?.stop();
+        this.navigationCollector = null;
       },
     };
   }
 
   detectCurrentBundleId(): string {
-    throw new Error("App Id detection is not implemented on iOS");
+    return detectIOSBundleId();
   }
 
   installProfilerOnDevice() {
-    // Do we need anything here?
+    // pyidevice handles connection automatically — no installation step needed
   }
 
   getScreenRecorder(): ScreenRecorder | undefined {
@@ -97,15 +130,22 @@ export class IOSProfiler implements Profiler {
   }
 
   cleanup: () => void = () => {
-    // Do we need anything here?
+    this.navigationCollector?.stop();
+    this.navigationCollector = null;
   };
 
   async stopApp(bundleId: string): Promise<void> {
-    killApp(bundleId);
-    return new Promise<void>((resolve) => resolve());
+    try {
+      if (this.deviceType === "simulator") {
+        execSync(`xcrun simctl terminate booted ${bundleId}`);
+      } else {
+        execSync(`pyidevice kill ${bundleId}`);
+      }
+    } catch (error) {
+      Logger.debug(`Failed to stop app ${bundleId}: ${error}`);
+    }
   }
 
-  // This is a placeholder for the method that will be implemented in the future
   detectDeviceRefreshRate() {
     return 60;
   }
