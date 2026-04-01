@@ -29,7 +29,8 @@ const hasIOSPhysicalDevice = (): boolean => {
         headerPassed = true;
         continue;
       }
-      if (headerPassed && line.toLowerCase().includes("connected")) {
+      const lineLower = line.toLowerCase();
+      if (headerPassed && (lineLower.includes("connected") || lineLower.includes("available"))) {
         return true;
       }
     }

@@ -73,7 +73,8 @@ const detectDevicectlDeviceId = (): string | null => {
 
       const parts = trimmed.split(/\s{3,}/);
       // parts: [Name, Hostname, Identifier, State, Model]
-      if (parts.length >= 4 && parts[3].toLowerCase() === "connected") {
+      const state = parts[3]?.toLowerCase() || "";
+      if (parts.length >= 4 && (state.includes("connected") || state.includes("available"))) {
         return parts[2].trim();
       }
     }
