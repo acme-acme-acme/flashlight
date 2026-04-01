@@ -172,7 +172,6 @@ export abstract class UnixProfiler implements Profiler {
           );
 
           const tpnEvents = navigationCollector.flush();
-          const tpn = tpnEvents.length > 0 ? tpnEvents : undefined;
 
           onMeasure(
             this.supportFPS()
@@ -180,13 +179,13 @@ export abstract class UnixProfiler implements Profiler {
                   cpu: cpuMeasures,
                   fps,
                   ram,
-                  tpn,
+                  ...(tpnEvents.length > 0 ? { tpn: tpnEvents } : {}),
                   time: timestamp - initialTime,
                 }
               : {
                   cpu: cpuMeasures,
                   ram,
-                  tpn,
+                  ...(tpnEvents.length > 0 ? { tpn: tpnEvents } : {}),
                   time: timestamp - initialTime,
                 }
           );

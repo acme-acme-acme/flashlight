@@ -83,7 +83,7 @@ export const withNavigationTracker = <P extends NavigationContainerProps>(
       ...rest,
       ref,
       onStateChange: handleStateChange,
-    } as P);
+    } as unknown as P);
   });
 
   TrackedContainer.displayName = "NavigationTrackerContainer";
