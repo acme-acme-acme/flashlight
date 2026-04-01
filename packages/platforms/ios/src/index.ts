@@ -1,4 +1,10 @@
-import { Measure, Profiler, ProfilerPollingOptions, ScreenRecorder } from "@perf-profiler/types";
+import {
+  Measure,
+  POLLING_INTERVAL,
+  Profiler,
+  ProfilerPollingOptions,
+  ScreenRecorder,
+} from "@perf-profiler/types";
 import { Logger } from "@perf-profiler/logger";
 import { ChildProcess, exec, execSync } from "child_process";
 import { detectIOSBundleId } from "./detectBundleId";
@@ -34,6 +40,29 @@ const detectDeviceType = (): IOSDeviceType => {
   return "device";
 };
 
+const resolveSimulatorPid = (bundleId: string): number | null => {
+  try {
+    // Get the executable name from the bundle
+    const appInfo = execSync(`xcrun simctl appinfo booted ${bundleId}`, { encoding: "utf-8" });
+    const exeMatch = appInfo.match(/CFBundleExecutable\s*=\s*"?([^";\n]+)"?/);
+    if (!exeMatch) {
+      Logger.warn(`Could not find CFBundleExecutable for ${bundleId}`);
+      return null;
+    }
+    const exeName = exeMatch[1].trim();
+
+    // Find the process by executable name
+    const pid = execSync(`pgrep -f "${exeName}.app/${exeName}$"`, { encoding: "utf-8" }).trim();
+    if (pid) {
+      Logger.info(`Resolved simulator PID for ${bundleId}: ${pid} (${exeName})`);
+      return parseInt(pid, 10);
+    }
+  } catch (error) {
+    Logger.debug(`Failed to resolve simulator PID for ${bundleId}: ${error}`);
+  }
+  return null;
+};
+
 export class IOSProfiler implements Profiler {
   private measures: Record<string, Measure> = {};
   private lastFPS: FPSData | null = null;
@@ -41,6 +70,7 @@ export class IOSProfiler implements Profiler {
   private onMeasure: ((measure: Measure) => void) | undefined;
   private navigationCollector: IOSNavigationEventCollector | null = null;
   private deviceType: IOSDeviceType;
+  private simulatorPollingInterval: ReturnType<typeof setInterval> | null = null;
 
   constructor() {
     this.deviceType = detectDeviceType();
@@ -77,6 +107,93 @@ export class IOSProfiler implements Profiler {
       Logger.warn(`iOS ${type} process exited with code ${code}`);
     });
   };
+
+  private emitMeasure = (cpu: number, ramKb: number) => {
+    const tpnEvents = this.navigationCollector?.flush() ?? [];
+    if (tpnEvents.length > 0) {
+      Logger.info(`iOS TPN flush: attaching ${tpnEvents.length} events to measure`);
+    }
+
+    const measure: Measure = {
+      cpu: {
+        perName: { Total: cpu },
+        perCore: {},
+      },
+      ram: ramKb / 1024, // Convert KB to MiB
+      fps: undefined,
+      time: Date.now(),
+      ...(tpnEvents.length > 0 ? { tpn: tpnEvents } : {}),
+    };
+
+    this.measures[measure.time] = measure;
+    if (this.onMeasure) {
+      this.onMeasure(measure);
+    }
+  };
+
+  private pollSimulator(bundleId: string): { stop: () => void } {
+    const pid = resolveSimulatorPid(bundleId);
+    if (!pid) {
+      Logger.error(
+        `Could not find running process for ${bundleId}. Make sure the app is running on the simulator.`
+      );
+      return { stop: () => {} };
+    }
+
+    Logger.info(`iOS Simulator: polling PID ${pid} every ${POLLING_INTERVAL}ms`);
+
+    this.simulatorPollingInterval = setInterval(() => {
+      try {
+        // ps -p <PID> -o %cpu=,rss= gives CPU% and RSS in KB
+        const output = execSync(`ps -p ${pid} -o %cpu=,rss=`, { encoding: "utf-8" }).trim();
+        if (!output) {
+          Logger.debug("iOS Simulator: ps returned empty output (process may have exited)");
+          return;
+        }
+
+        const parts = output.trim().split(/\s+/);
+        if (parts.length >= 2) {
+          const cpu = parseFloat(parts[0]);
+          const rssKb = parseInt(parts[1], 10);
+          Logger.debug(
+            `iOS Simulator: CPU=${cpu}%, RAM=${rssKb}KB (${(rssKb / 1024).toFixed(1)} MiB)`
+          );
+          this.emitMeasure(cpu, rssKb);
+        }
+      } catch (error) {
+        Logger.debug(`iOS Simulator: polling error: ${error}`);
+      }
+    }, POLLING_INTERVAL);
+
+    return {
+      stop: () => {
+        if (this.simulatorPollingInterval) {
+          clearInterval(this.simulatorPollingInterval);
+          this.simulatorPollingInterval = null;
+        }
+      },
+    };
+  }
+
+  private pollPhysicalDevice(bundleId: string): { stop: () => void } {
+    const cpuCmd = `pyidevice instruments appmonitor --format=flush -b ${bundleId} --time 500`;
+    const fpsCmd = `pyidevice instruments fps --format=flush --time 500`;
+    Logger.info(`iOS Physical Device CPU command: ${cpuCmd}`);
+    Logger.info(`iOS Physical Device FPS command: ${fpsCmd}`);
+
+    const cpuAndMemoryPolling = exec(cpuCmd);
+    const fpsPolling = exec(fpsCmd);
+
+    this.parseData(cpuAndMemoryPolling, "cpu");
+    this.parseData(fpsPolling, "fps");
+
+    return {
+      stop: () => {
+        cpuAndMemoryPolling.kill();
+        fpsPolling.kill();
+      },
+    };
+  }
 
   createMeasure = (lastCpu: AppMonitorData, lastFps: FPSData) => {
     const cpuMeasure = {
@@ -118,21 +235,14 @@ export class IOSProfiler implements Profiler {
     this.navigationCollector = new IOSNavigationEventCollector(this.deviceType);
     this.navigationCollector.start();
 
-    const cpuCmd = `pyidevice instruments appmonitor --format=flush -b ${bundleId} --time 500`;
-    const fpsCmd = `pyidevice instruments fps --format=flush --time 500`;
-    Logger.info(`iOS CPU command: ${cpuCmd}`);
-    Logger.info(`iOS FPS command: ${fpsCmd}`);
-
-    const cpuAndMemoryPolling = exec(cpuCmd);
-    const fpsPolling = exec(fpsCmd);
-
-    this.parseData(cpuAndMemoryPolling, "cpu");
-    this.parseData(fpsPolling, "fps");
+    const polling =
+      this.deviceType === "simulator"
+        ? this.pollSimulator(bundleId)
+        : this.pollPhysicalDevice(bundleId);
 
     return {
       stop: () => {
-        cpuAndMemoryPolling.kill();
-        fpsPolling.kill();
+        polling.stop();
         this.navigationCollector?.stop();
         this.navigationCollector = null;
       },
@@ -144,7 +254,7 @@ export class IOSProfiler implements Profiler {
   }
 
   installProfilerOnDevice() {
-    // pyidevice handles connection automatically — no installation step needed
+    // No installation step needed for either simulator or physical device
   }
 
   getScreenRecorder(): ScreenRecorder | undefined {
@@ -154,6 +264,10 @@ export class IOSProfiler implements Profiler {
   cleanup: () => void = () => {
     this.navigationCollector?.stop();
     this.navigationCollector = null;
+    if (this.simulatorPollingInterval) {
+      clearInterval(this.simulatorPollingInterval);
+      this.simulatorPollingInterval = null;
+    }
   };
 
   async stopApp(bundleId: string): Promise<void> {
