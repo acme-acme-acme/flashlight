@@ -23,7 +23,7 @@ export const createExpressApp = ({ port }: { port: number }) => {
     try {
       const indexHtml = path.join(pathToDist, "index.html");
       let data = await fs.readFile(indexHtml, "utf8");
-      data = data.replace("localhost:3000", `localhost:${port}`);
+      data = data.replace("localhost:4000", `localhost:${port}`);
 
       res.send(data);
     } catch (err) {
