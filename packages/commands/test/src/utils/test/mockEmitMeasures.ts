@@ -22,6 +22,7 @@ const mockSpawn = (): ChildProcess => {
 };
 
 export const aTraceMock = mockSpawn();
+export const logcatMock = mockSpawn();
 export const perfProfilerMock = mockSpawn();
 
 jest
@@ -30,6 +31,10 @@ jest
   .mockImplementationOnce((...args) => {
     expect(args).toEqual(["adb", ["shell", "atrace", "-c", "view", "-t", "999"]]);
     return aTraceMock;
+  })
+  .mockImplementationOnce((...args) => {
+    expect(args).toEqual(["adb", ["logcat", "-s", "ReactNativeJS:*"]]);
+    return logcatMock;
   })
   .mockImplementationOnce((...args) => {
     expect(args).toEqual([

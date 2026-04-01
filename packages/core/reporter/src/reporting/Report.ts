@@ -12,6 +12,7 @@ import { getAverageFPSUsage, getFpsStats } from "./fps";
 import { getAverageTotalHighCPUUsage, getHighCpuStats } from "./highCpu";
 import { getAverageRAMUsage, getRamStats } from "./ram";
 import { getRuntimeStats } from "./runtime";
+import { getAverageNavigationTime } from "./tpn";
 
 interface ReportMetrics {
   runtime: number;
@@ -19,6 +20,7 @@ interface ReportMetrics {
   cpu: number;
   totalHighCpuTime: number;
   ram?: number;
+  averageNavigationTime?: number;
   averageCpuUsagePerProcess: {
     cpuUsage: number;
     processName: string;
@@ -52,6 +54,7 @@ export class Report {
       cpu: averageCPU,
       totalHighCpuTime: averageTotalHighCPU,
       ram: averageRAM ? roundToDecimal(averageRAM, 1) : undefined,
+      averageNavigationTime: getAverageNavigationTime(averagedResult.average.measures),
       averageCpuUsagePerProcess: getAverageCpuUsagePerProcess(averagedResult.average.measures),
     };
   }

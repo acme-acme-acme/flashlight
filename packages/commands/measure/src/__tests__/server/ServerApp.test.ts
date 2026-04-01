@@ -18,7 +18,7 @@ describe("ServerApp", () => {
   });
 
   const FLASHLIGHT_DATA_PLACEHOLDER =
-    'window.__FLASHLIGHT_DATA__ = { socketServerUrl: "http://localhost:3000" };';
+    'window.__FLASHLIGHT_DATA__ = { socketServerUrl: "http://localhost:4000" };';
 
   beforeEach(() => {
     (fs.promises.readFile as jest.Mock).mockResolvedValue(

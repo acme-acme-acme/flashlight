@@ -1,0 +1,21 @@
+{
+  "name": "@flashlight/navigation-tracker",
+  "version": "0.1.0",
+  "description": "Auto-instruments React Navigation to emit TPN markers for Flashlight",
+  "main": "dist/src/index.js",
+  "types": "dist/src/index.d.ts",
+  "scripts": {
+    "test": "jest"
+  },
+  "license": "MIT",
+  "peerDependencies": {
+    "react": ">=16.8.0",
+    "react-native": ">=0.60.0",
+    "@react-navigation/native": ">=5.0.0"
+  },
+  "devDependencies": {
+    "react": "^18.0.0",
+    "@react-navigation/native": "^6.0.0",
+    "@types/react": "^18.0.0"
+  }
+}

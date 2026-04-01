@@ -41,6 +41,8 @@ const averageMaps = (maps: { [key: string]: number }[]): { [key: string]: number
 };
 
 const averageMeasures = (measures: Measure[]): Measure => {
+  const tpnEvents = measures.flatMap((m) => m.tpn ?? []);
+
   return {
     cpu: {
       perCore: {},
@@ -48,6 +50,7 @@ const averageMeasures = (measures: Measure[]): Measure => {
     },
     ram: average(measures.map((m) => m.ram)),
     fps: average(measures.map((m) => m.fps)),
+    ...(tpnEvents.length > 0 ? { tpn: tpnEvents } : {}),
     time: POLLING_INTERVAL,
   };
 };

@@ -30,6 +30,7 @@ const NODE_PACKAGES = [
   "core/reporter",
   "core/shell",
   "commands/report",
+  "plugins/navigation-tracker",
 ];
 
 module.exports = {
