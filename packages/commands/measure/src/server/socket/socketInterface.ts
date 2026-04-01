@@ -1,10 +1,13 @@
 import { TestCaseResult } from "@perf-profiler/types";
 import { Server, Socket } from "socket.io";
 
+export type DetectedPlatform = "ios" | "android";
+
 export interface SocketData {
   isMeasuring: boolean;
   bundleId: string | null;
   results: TestCaseResult[];
+  platform: DetectedPlatform;
 }
 
 export interface ServerToClientEvents {

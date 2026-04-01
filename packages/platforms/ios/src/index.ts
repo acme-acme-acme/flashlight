@@ -47,16 +47,34 @@ export class IOSProfiler implements Profiler {
   }
 
   parseData = async (childProcess: ChildProcess, type: DataTypes) => {
-    childProcess?.stdout?.on("data", (childProcess: ChildProcess) => {
-      const parsedData = JSON.parse(childProcess.toString().replace(/'/g, '"'));
-      if (type === "cpu") {
-        (parsedData as AppMonitorData).Time = new Date().toISOString();
-        this.lastCpu = parsedData;
-        this.synchronizeData();
+    childProcess?.stdout?.on("data", (data: Buffer) => {
+      const raw = data.toString();
+      Logger.debug(`iOS ${type} raw data: ${raw}`);
+      try {
+        const parsedData = JSON.parse(raw.replace(/'/g, '"'));
+        if (type === "cpu") {
+          (parsedData as AppMonitorData).Time = new Date().toISOString();
+          this.lastCpu = parsedData;
+          this.synchronizeData();
+        }
+        if (type === "fps") {
+          this.lastFPS = parsedData as FPSData;
+        }
+      } catch (error) {
+        Logger.debug(`iOS ${type} parse error: ${error}`);
       }
-      if (type === "fps") {
-        this.lastFPS = parsedData as FPSData;
-      }
+    });
+
+    childProcess?.stderr?.on("data", (data: Buffer) => {
+      Logger.warn(`iOS ${type} stderr: ${data.toString()}`);
+    });
+
+    childProcess?.on("error", (error) => {
+      Logger.error(`iOS ${type} process error: ${error.message}`);
+    });
+
+    childProcess?.on("exit", (code) => {
+      Logger.warn(`iOS ${type} process exited with code ${code}`);
     });
   };
 
@@ -95,14 +113,18 @@ export class IOSProfiler implements Profiler {
   pollPerformanceMeasures(bundleId: string, options: ProfilerPollingOptions): { stop: () => void } {
     this.onMeasure = options.onMeasure;
 
+    Logger.info(`iOS: Starting performance polling for ${bundleId} (${this.deviceType})`);
+
     this.navigationCollector = new IOSNavigationEventCollector(this.deviceType);
     this.navigationCollector.start();
 
-    const cpuAndMemoryPolling = exec(
-      `pyidevice instruments appmonitor --format=flush -b ${bundleId} --time 500`
-    );
+    const cpuCmd = `pyidevice instruments appmonitor --format=flush -b ${bundleId} --time 500`;
+    const fpsCmd = `pyidevice instruments fps --format=flush --time 500`;
+    Logger.info(`iOS CPU command: ${cpuCmd}`);
+    Logger.info(`iOS FPS command: ${fpsCmd}`);
 
-    const fpsPolling = exec(`pyidevice instruments fps --format=flush --time 500`);
+    const cpuAndMemoryPolling = exec(cpuCmd);
+    const fpsPolling = exec(fpsCmd);
 
     this.parseData(cpuAndMemoryPolling, "cpu");
     this.parseData(fpsPolling, "fps");
