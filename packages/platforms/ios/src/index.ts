@@ -6,7 +6,7 @@ import {
   ScreenRecorder,
 } from "@perf-profiler/types";
 import { Logger } from "@perf-profiler/logger";
-import { execSync, spawnSync } from "child_process";
+import { ChildProcess, execSync, spawn } from "child_process";
 import os from "os";
 import path from "path";
 import fs from "fs";
@@ -54,6 +54,7 @@ export class IOSProfiler implements Profiler {
   private navigationCollector: IOSNavigationEventCollector | null = null;
   private deviceType: IOSDeviceType;
   private simulatorPollingInterval: ReturnType<typeof setInterval> | null = null;
+  private xctraceProcess: ChildProcess | null = null;
 
   constructor() {
     this.deviceType = detectDeviceType();
@@ -138,43 +139,53 @@ export class IOSProfiler implements Profiler {
       `iOS Physical Device: metrics will appear after the ${duration}s recording completes.`
     );
 
-    // Run xctrace synchronously with --time-limit in a background thread via spawnSync
-    // xctrace only produces valid trace files when it exits cleanly (via --time-limit)
-    let recordingDone = false;
+    // Use async spawn with --time-limit so Node's event loop stays responsive
+    // xctrace will exit cleanly when the time limit is reached, producing a valid trace
+    this.xctraceProcess = spawn(
+      "xctrace",
+      [
+        "record",
+        "--device",
+        deviceId,
+        "--template",
+        "Activity Monitor",
+        "--instrument",
+        "Core Animation FPS",
+        "--all-processes",
+        "--output",
+        tracePath,
+        "--time-limit",
+        `${duration}s`,
+        "--no-prompt",
+      ],
+      { stdio: ["pipe", "pipe", "pipe"] }
+    );
 
-    const recordAndParse = () => {
-      const result = spawnSync(
-        "xctrace",
-        [
-          "record",
-          "--device",
-          deviceId,
-          "--template",
-          "Activity Monitor",
-          "--instrument",
-          "Core Animation FPS",
-          "--all-processes",
-          "--output",
-          tracePath,
-          "--time-limit",
-          `${duration}s`,
-          "--no-prompt",
-        ],
-        {
-          encoding: "utf-8",
-          timeout: (duration + 15) * 1000,
-        }
-      );
+    this.xctraceProcess.stdout?.on("data", (data: Buffer) => {
+      Logger.info(`xctrace: ${data.toString().trim()}`);
+    });
 
-      recordingDone = true;
+    this.xctraceProcess.stderr?.on("data", (data: Buffer) => {
+      const msg = data.toString().trim();
+      if (msg) Logger.warn(`xctrace stderr: ${msg}`);
+    });
 
-      if (result.status !== 0) {
-        Logger.error(`xctrace exited with status ${result.status}: ${result.stderr}`);
+    this.xctraceProcess.on("error", (error) => {
+      Logger.error(`xctrace process error: ${error.message}`);
+      this.xctraceProcess = null;
+    });
+
+    this.xctraceProcess.on("exit", (code) => {
+      Logger.info(`xctrace: recording finished (exit code ${code})`);
+      this.xctraceProcess = null;
+
+      if (code !== 0) {
+        Logger.error(`xctrace recording failed (exit code ${code})`);
         return;
       }
 
-      Logger.info("iOS Physical Device: recording complete, parsing trace...");
-
+      // Parse the trace and emit all measures retroactively
+      Logger.info(`iOS Physical Device: parsing trace for "${bundleId}"...`);
       try {
         const measures = parseTrace(tracePath, bundleId);
         Logger.info(`iOS Physical Device: parsed ${measures.length} measures`);
@@ -198,20 +209,17 @@ export class IOSProfiler implements Profiler {
           fs.rmSync(tracePath, { recursive: true });
         }
       }
-    };
-
-    // Run in next tick so pollPerformanceMeasures returns immediately
-    setImmediate(recordAndParse);
+    });
 
     return {
       stop: () => {
-        if (recordingDone) {
-          Logger.info("iOS Physical Device: recording already complete");
-        } else {
+        if (this.xctraceProcess) {
           Logger.info(
-            "iOS Physical Device: recording still in progress. " +
-              "Measures will appear when the recording finishes."
+            `iOS Physical Device: recording still in progress (${duration}s total). ` +
+              `Measures will appear when the recording finishes.`
           );
+        } else {
+          Logger.info("iOS Physical Device: recording already complete");
         }
       },
     };
@@ -222,8 +230,11 @@ export class IOSProfiler implements Profiler {
 
     Logger.info(`iOS: Starting performance polling for ${bundleId} (${this.deviceType})`);
 
-    this.navigationCollector = new IOSNavigationEventCollector(this.deviceType);
-    this.navigationCollector.start();
+    // Only start TPN for simulator (physical device doesn't have a CLI log stream tool)
+    if (this.deviceType === "simulator") {
+      this.navigationCollector = new IOSNavigationEventCollector(this.deviceType);
+      this.navigationCollector.start();
+    }
 
     const polling =
       this.deviceType === "simulator"
@@ -257,6 +268,10 @@ export class IOSProfiler implements Profiler {
     if (this.simulatorPollingInterval) {
       clearInterval(this.simulatorPollingInterval);
       this.simulatorPollingInterval = null;
+    }
+    if (this.xctraceProcess) {
+      this.xctraceProcess.kill("SIGKILL");
+      this.xctraceProcess = null;
     }
   };
 
