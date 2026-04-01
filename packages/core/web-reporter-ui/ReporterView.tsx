@@ -89,7 +89,15 @@ const Report = ({
                 </div>
                 <div className="h-10" />
 
-                <HideSectionIfUndefinedValueFound>
+                <HideSectionIfUndefinedValueFound
+                  key={
+                    averagedResults
+                      .flatMap((r) => r.average.measures)
+                      .some((m) => m.tpn && m.tpn.length > 0)
+                      ? "tpn-has-data"
+                      : "tpn-no-data"
+                  }
+                >
                   <div className="mx-8 p-6 bg-dark-charcoal border border-gray-800 rounded-lg">
                     <TPNReport results={averagedResults} />
                   </div>

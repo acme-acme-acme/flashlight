@@ -172,6 +172,9 @@ export abstract class UnixProfiler implements Profiler {
           );
 
           const tpnEvents = navigationCollector.flush();
+          if (tpnEvents.length > 0) {
+            Logger.info(`TPN flush: attaching ${tpnEvents.length} events to measure`);
+          }
 
           onMeasure(
             this.supportFPS()

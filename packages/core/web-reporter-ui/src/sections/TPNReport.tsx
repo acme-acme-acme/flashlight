@@ -34,19 +34,24 @@ export const TPNReport = ({ results }: { results: AveragedTestCaseResult[] }) =>
   const options = {
     plotOptions: {
       bar: {
-        horizontal: true,
         distributed: true,
+        columnWidth: "60%",
       },
     },
     xaxis: {
+      labels: {
+        rotate: -45,
+        rotateAlways: true,
+        style: { colors: "#FFFFFF99" },
+      },
+    },
+    yaxis: {
       title: {
         text: "Duration (ms)",
         style: { color: "#FFFFFF99" },
       },
-    },
-    yaxis: {
       labels: {
-        maxWidth: 250,
+        style: { colors: "#FFFFFF99" },
       },
     },
     tooltip: {
@@ -71,7 +76,7 @@ export const TPNReport = ({ results }: { results: AveragedTestCaseResult[] }) =>
       type="bar"
       title="Time Per Navigation (TPN)"
       series={series}
-      height={Math.max(300, events.length * 50)}
+      height={500}
       options={options}
     />
   );

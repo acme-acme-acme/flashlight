@@ -1,6 +1,6 @@
 import { Logger } from "@perf-profiler/logger";
 import { NavigationEvent } from "@perf-profiler/types";
-import { executeAsync } from "../shell";
+import { executeAsync, executeCommand } from "../shell";
 import { ChildProcess } from "child_process";
 
 const TPN_PREFIX = "[FLASHLIGHT_TPN]";
@@ -61,6 +61,12 @@ export class NavigationEventCollector {
   private completedEvents: NavigationEvent[] = [];
 
   start(): void {
+    // Clear logcat buffer so we only get live events, not historical ones
+    try {
+      executeCommand("adb logcat -c");
+    } catch {
+      // ignore if clear fails
+    }
     this.process = executeAsync("adb logcat -s ReactNativeJS:*", { logStderr: false });
 
     this.process.stdout?.on("data", (data: Buffer) => {
@@ -68,9 +74,11 @@ export class NavigationEventCollector {
       for (const line of lines) {
         const event = parseTPNLine(line);
         if (event) {
+          Logger.info(`TPN event received: ${JSON.stringify(event)}`);
           this.pendingEvents.push(event);
           const matched = matchNavigationPairs(this.pendingEvents);
           if (matched.length > 0) {
+            Logger.info(`TPN navigation matched: ${JSON.stringify(matched)}`);
             this.completedEvents.push(...matched);
             this.pendingEvents = [];
           }
