@@ -77,7 +77,7 @@ describe("detectPlatform", () => {
     expect(() => detectPlatform()).toThrow("Both iOS and Android devices detected");
   });
 
-  it("throws when no devices detected", () => {
+  it("defaults to android when no devices detected", () => {
     mockExecSync.mockImplementation((cmd: string) => {
       if (cmd.includes("xcrun simctl")) return "\n";
       if (cmd.includes("pyidevice")) throw new Error("not found");
@@ -85,6 +85,6 @@ describe("detectPlatform", () => {
       throw new Error("unknown command");
     });
 
-    expect(() => detectPlatform()).toThrow("No iOS or Android devices detected");
+    expect(detectPlatform()).toBe("android");
   });
 });

@@ -66,11 +66,11 @@ export const detectPlatform = (): Platform => {
     return "android";
   }
 
-  throw new Error(
-    "No iOS or Android devices detected. Checked:\n" +
+  Logger.debug(
+    "No iOS or Android devices detected. Defaulting to Android. Checked:\n" +
       "  - iOS Simulator: xcrun simctl list devices booted\n" +
       "  - iOS Physical: pyidevice devicelist\n" +
-      "  - Android: adb devices\n" +
-      "Make sure a device or simulator is running."
+      "  - Android: adb devices"
   );
+  return "android";
 };
