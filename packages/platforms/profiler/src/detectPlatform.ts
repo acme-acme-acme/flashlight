@@ -17,14 +17,26 @@ const hasBootedIOSSimulator = (): boolean => {
 
 const hasIOSPhysicalDevice = (): boolean => {
   try {
-    const output = execSync("pyidevice devicelist", {
+    const output = execSync("devicectl list devices", {
       encoding: "utf-8",
-      stdio: ["pipe", "pipe", "pipe"],
+      timeout: 10000,
     });
-    return output.trim().length > 0;
+    // Look for a line with "connected" after the separator
+    const lines = output.split("\n");
+    let headerPassed = false;
+    for (const line of lines) {
+      if (line.match(/^-+\s+-+/)) {
+        headerPassed = true;
+        continue;
+      }
+      if (headerPassed && line.toLowerCase().includes("connected")) {
+        return true;
+      }
+    }
   } catch {
-    return false;
+    // devicectl not available
   }
+  return false;
 };
 
 const hasAndroidDevice = (): boolean => {
@@ -69,7 +81,7 @@ export const detectPlatform = (): Platform => {
   Logger.debug(
     "No iOS or Android devices detected. Defaulting to Android. Checked:\n" +
       "  - iOS Simulator: xcrun simctl list devices booted\n" +
-      "  - iOS Physical: pyidevice devicelist\n" +
+      "  - iOS Physical: devicectl list devices\n" +
       "  - Android: adb devices"
   );
   return "android";

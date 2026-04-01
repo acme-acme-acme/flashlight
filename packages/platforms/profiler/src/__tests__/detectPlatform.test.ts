@@ -45,10 +45,11 @@ describe("detectPlatform", () => {
     expect(detectPlatform()).toBe("ios");
   });
 
-  it("detects Android when adb device connected and no iOS simulator", () => {
+  it("detects Android when adb device connected and no iOS", () => {
     mockExecSync.mockImplementation((cmd: string) => {
       if (cmd.includes("xcrun simctl")) return "\n";
-      if (cmd.includes("pyidevice")) throw new Error("not found");
+      if (cmd.includes("devicectl list"))
+        return "Name   Hostname   Identifier   State   Model\n----   --------   ----------   -----   -----\n";
       if (cmd.includes("adb devices")) return "List of devices attached\nemulator-5554\tdevice\n";
       throw new Error("unknown command");
     });
@@ -56,10 +57,11 @@ describe("detectPlatform", () => {
     expect(detectPlatform()).toBe("android");
   });
 
-  it("detects iOS physical device via pyidevice", () => {
+  it("detects iOS physical device via devicectl", () => {
     mockExecSync.mockImplementation((cmd: string) => {
       if (cmd.includes("xcrun simctl")) return "\n";
-      if (cmd.includes("pyidevice devicelist")) return "abcdef123456\n";
+      if (cmd.includes("devicectl list"))
+        return "Name   Hostname   Identifier   State       Model\n----   --------   ----------   ---------   -----\niPhone   host.local   ABCD-1234   connected   iPhone 16\n";
       if (cmd.includes("adb devices")) return "List of devices attached\n\n";
       throw new Error("unknown command");
     });
@@ -80,7 +82,8 @@ describe("detectPlatform", () => {
   it("defaults to android when no devices detected", () => {
     mockExecSync.mockImplementation((cmd: string) => {
       if (cmd.includes("xcrun simctl")) return "\n";
-      if (cmd.includes("pyidevice")) throw new Error("not found");
+      if (cmd.includes("devicectl list"))
+        return "Name   Hostname   Identifier   State   Model\n----   --------   ----------   -----   -----\n";
       if (cmd.includes("adb devices")) return "List of devices attached\n\n";
       throw new Error("unknown command");
     });
