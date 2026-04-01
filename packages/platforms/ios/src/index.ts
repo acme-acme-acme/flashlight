@@ -6,11 +6,16 @@ import {
   ScreenRecorder,
 } from "@perf-profiler/types";
 import { Logger } from "@perf-profiler/logger";
-import { execSync } from "child_process";
+import { execSync, spawnSync } from "child_process";
+import os from "os";
+import path from "path";
+import fs from "fs";
 import { detectIOSBundleId } from "./detectBundleId";
 import { IOSNavigationEventCollector, IOSDeviceType } from "./tpn/IOSNavigationEventCollector";
-import { XCTraceRecorder, detectXCTraceDeviceId } from "./xctrace/XCTraceRecorder";
+import { detectXCTraceDeviceId } from "./xctrace/XCTraceRecorder";
 import { parseTrace } from "./xctrace/XCTraceParser";
+
+const PHYSICAL_DEVICE_RECORDING_SECONDS = 30;
 
 const detectDeviceType = (): IOSDeviceType => {
   try {
@@ -26,7 +31,6 @@ const detectDeviceType = (): IOSDeviceType => {
 
 const resolveSimulatorPid = (bundleId: string): number | null => {
   try {
-    // Get the executable name from the bundle
     const appInfo = execSync(`xcrun simctl appinfo booted ${bundleId}`, { encoding: "utf-8" });
     const exeMatch = appInfo.match(/CFBundleExecutable\s*=\s*"?([^";\n]+)"?/);
     if (!exeMatch) {
@@ -34,8 +38,6 @@ const resolveSimulatorPid = (bundleId: string): number | null => {
       return null;
     }
     const exeName = exeMatch[1].trim();
-
-    // Find the process by executable name
     const pid = execSync(`pgrep -f "${exeName}.app/${exeName}$"`, { encoding: "utf-8" }).trim();
     if (pid) {
       Logger.info(`Resolved simulator PID for ${bundleId}: ${pid} (${exeName})`);
@@ -52,8 +54,6 @@ export class IOSProfiler implements Profiler {
   private navigationCollector: IOSNavigationEventCollector | null = null;
   private deviceType: IOSDeviceType;
   private simulatorPollingInterval: ReturnType<typeof setInterval> | null = null;
-  private xctraceRecorder: XCTraceRecorder | null = null;
-  private currentBundleId: string | null = null;
 
   constructor() {
     this.deviceType = detectDeviceType();
@@ -70,7 +70,7 @@ export class IOSProfiler implements Profiler {
         perName: { Total: cpu },
         perCore: {},
       },
-      ram: ramKb / 1024, // Convert KB to MiB
+      ram: ramKb / 1024,
       fps: undefined,
       time: Date.now(),
       ...(tpnEvents.length > 0 ? { tpn: tpnEvents } : {}),
@@ -94,12 +94,8 @@ export class IOSProfiler implements Profiler {
 
     this.simulatorPollingInterval = setInterval(() => {
       try {
-        // ps -p <PID> -o %cpu=,rss= gives CPU% and RSS in KB
         const output = execSync(`ps -p ${pid} -o %cpu=,rss=`, { encoding: "utf-8" }).trim();
-        if (!output) {
-          Logger.debug("iOS Simulator: ps returned empty output (process may have exited)");
-          return;
-        }
+        if (!output) return;
 
         const parts = output.trim().split(/\s+/);
         if (parts.length >= 2) {
@@ -134,49 +130,89 @@ export class IOSProfiler implements Profiler {
       return { stop: () => {} };
     }
 
-    this.xctraceRecorder = new XCTraceRecorder(deviceId);
-    this.xctraceRecorder.start();
+    const tracePath = path.join(os.tmpdir(), `flashlight-trace-${Date.now()}.trace`);
+    const duration = PHYSICAL_DEVICE_RECORDING_SECONDS;
 
+    Logger.info(`iOS Physical Device: starting ${duration}s xctrace recording to ${tracePath}`);
     Logger.info(
-      `iOS Physical Device: xctrace recording started. Metrics will be available after stopping.`
+      `iOS Physical Device: metrics will appear after the ${duration}s recording completes.`
     );
+
+    // Run xctrace synchronously with --time-limit in a background thread via spawnSync
+    // xctrace only produces valid trace files when it exits cleanly (via --time-limit)
+    let recordingDone = false;
+
+    const recordAndParse = () => {
+      const result = spawnSync(
+        "xctrace",
+        [
+          "record",
+          "--device",
+          deviceId,
+          "--template",
+          "Activity Monitor",
+          "--instrument",
+          "Core Animation FPS",
+          "--all-processes",
+          "--output",
+          tracePath,
+          "--time-limit",
+          `${duration}s`,
+          "--no-prompt",
+        ],
+        {
+          encoding: "utf-8",
+          timeout: (duration + 15) * 1000,
+        }
+      );
+
+      recordingDone = true;
+
+      if (result.status !== 0) {
+        Logger.error(`xctrace exited with status ${result.status}: ${result.stderr}`);
+        return;
+      }
+
+      Logger.info("iOS Physical Device: recording complete, parsing trace...");
+
+      try {
+        const measures = parseTrace(tracePath, bundleId);
+        Logger.info(`iOS Physical Device: parsed ${measures.length} measures`);
+
+        if (measures.length === 0) {
+          Logger.warn(
+            `iOS Physical Device: no measures found for "${bundleId}". ` +
+              `The app name in the trace may differ.`
+          );
+        }
+
+        for (const measure of measures) {
+          if (this.onMeasure) {
+            this.onMeasure(measure);
+          }
+        }
+      } catch (error) {
+        Logger.error(`iOS Physical Device: trace parsing failed: ${error}`);
+      } finally {
+        if (fs.existsSync(tracePath)) {
+          fs.rmSync(tracePath, { recursive: true });
+        }
+      }
+    };
+
+    // Run in next tick so pollPerformanceMeasures returns immediately
+    setImmediate(recordAndParse);
 
     return {
       stop: () => {
-        if (!this.xctraceRecorder) {
-          Logger.warn("iOS Physical Device: no xctrace recorder to stop");
-          return;
+        if (recordingDone) {
+          Logger.info("iOS Physical Device: recording already complete");
+        } else {
+          Logger.info(
+            "iOS Physical Device: recording still in progress. " +
+              "Measures will appear when the recording finishes."
+          );
         }
-
-        Logger.info("iOS Physical Device: stopping xctrace recording...");
-        const tracePath = this.xctraceRecorder.stop();
-        Logger.info(`iOS Physical Device: trace saved to ${tracePath}`);
-
-        // Parse the trace and emit all measures retroactively
-        Logger.info(`iOS Physical Device: parsing trace for bundle ID "${bundleId}"...`);
-        try {
-          const measures = parseTrace(tracePath, bundleId);
-          Logger.info(`iOS Physical Device: parsed ${measures.length} measures from trace`);
-
-          if (measures.length === 0) {
-            Logger.warn(
-              `iOS Physical Device: no measures found for "${bundleId}". ` +
-                `The app name in the trace may differ. Check xctrace export output manually.`
-            );
-          }
-
-          for (const measure of measures) {
-            if (this.onMeasure) {
-              this.onMeasure(measure);
-            }
-          }
-        } catch (error) {
-          Logger.error(`iOS Physical Device: failed to parse trace: ${error}`);
-        }
-
-        // Clean up trace file
-        this.xctraceRecorder.cleanup();
-        this.xctraceRecorder = null;
       },
     };
   }
@@ -208,7 +244,7 @@ export class IOSProfiler implements Profiler {
   }
 
   installProfilerOnDevice() {
-    // No installation step needed for either simulator or physical device
+    // No installation step needed
   }
 
   getScreenRecorder(): ScreenRecorder | undefined {
@@ -222,10 +258,6 @@ export class IOSProfiler implements Profiler {
       clearInterval(this.simulatorPollingInterval);
       this.simulatorPollingInterval = null;
     }
-    if (this.xctraceRecorder) {
-      this.xctraceRecorder.cleanup();
-      this.xctraceRecorder = null;
-    }
   };
 
   async stopApp(bundleId: string): Promise<void> {
@@ -233,7 +265,6 @@ export class IOSProfiler implements Profiler {
       if (this.deviceType === "simulator") {
         execSync(`xcrun simctl terminate booted ${bundleId}`);
       } else {
-        // Use devicectl for iOS 17+ physical devices
         const deviceId = detectXCTraceDeviceId();
         if (deviceId) {
           execSync(

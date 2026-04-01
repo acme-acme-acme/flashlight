@@ -1,93 +1,80 @@
 import { Logger } from "@perf-profiler/logger";
-import { ChildProcess, execSync, spawn } from "child_process";
+import { execSync } from "child_process";
 import os from "os";
 import path from "path";
 import fs from "fs";
 
+const DEFAULT_RECORDING_DURATION_S = 60;
+
 export class XCTraceRecorder {
-  private process: ChildProcess | null = null;
   private tracePath: string;
   private deviceId: string;
+  private durationSeconds: number;
+  private recording = false;
+  private recordingComplete = false;
 
-  constructor(deviceId: string) {
+  constructor(deviceId: string, durationSeconds?: number) {
     this.deviceId = deviceId;
+    this.durationSeconds = durationSeconds || DEFAULT_RECORDING_DURATION_S;
     this.tracePath = path.join(os.tmpdir(), `flashlight-trace-${Date.now()}.trace`);
   }
 
+  /**
+   * Start recording synchronously in a background thread.
+   * The recording runs for the specified duration and then stops automatically.
+   * This is non-blocking — it spawns the recording in a detached child process.
+   */
   start(): void {
-    // Clean up any previous trace at this path
     if (fs.existsSync(this.tracePath)) {
       fs.rmSync(this.tracePath, { recursive: true });
     }
 
-    const args = [
-      "record",
-      "--device",
-      this.deviceId,
-      "--template",
-      "Activity Monitor",
-      "--instrument",
-      "Core Animation FPS",
-      "--all-processes",
-      "--output",
-      this.tracePath,
-      "--no-prompt",
-    ];
+    this.recording = true;
+    this.recordingComplete = false;
 
-    Logger.info(`xctrace: starting recording to ${this.tracePath}`);
-    Logger.info(`xctrace: xctrace ${args.join(" ")}`);
+    Logger.info(`xctrace: starting ${this.durationSeconds}s recording to ${this.tracePath}`);
 
-    this.process = spawn("xctrace", args, {
+    // Run xctrace in a shell background process with time-limit
+    // We write a PID file so we can kill it early if needed
+    const pidFile = path.join(os.tmpdir(), `flashlight-xctrace-${Date.now()}.pid`);
+    const cmd =
+      `xctrace record` +
+      ` --device "${this.deviceId}"` +
+      ` --template "Activity Monitor"` +
+      ` --instrument "Core Animation FPS"` +
+      ` --all-processes` +
+      ` --output "${this.tracePath}"` +
+      ` --time-limit ${this.durationSeconds}s` +
+      ` --no-prompt`;
+
+    Logger.info(`xctrace: ${cmd}`);
+
+    // Launch in background via shell, saving PID
+    execSync(`sh -c '${cmd} & echo $! > "${pidFile}" && wait'`, {
+      encoding: "utf-8",
+      timeout: (this.durationSeconds + 10) * 1000,
       stdio: ["pipe", "pipe", "pipe"],
     });
 
-    this.process.stdout?.on("data", (data: Buffer) => {
-      Logger.debug(`xctrace stdout: ${data.toString().trim()}`);
-    });
+    this.recordingComplete = true;
+    this.recording = false;
 
-    this.process.stderr?.on("data", (data: Buffer) => {
-      Logger.debug(`xctrace stderr: ${data.toString().trim()}`);
-    });
+    if (fs.existsSync(pidFile)) {
+      fs.unlinkSync(pidFile);
+    }
 
-    this.process.on("error", (error) => {
-      Logger.error(`xctrace process error: ${error.message}`);
-    });
-
-    this.process.on("exit", (code) => {
-      Logger.info(`xctrace: recording stopped (exit code ${code})`);
-    });
+    if (fs.existsSync(this.tracePath)) {
+      Logger.info(`xctrace: recording complete, trace saved at ${this.tracePath}`);
+    } else {
+      Logger.error(`xctrace: recording finished but trace file not found`);
+    }
   }
 
-  stop(): string {
-    if (this.process) {
-      const pid = this.process.pid;
-      Logger.info(`xctrace: sending SIGINT to PID ${pid} to stop recording...`);
-      this.process.kill("SIGINT");
-      this.process = null;
-
-      // Use a synchronous subprocess to wait for xctrace to fully exit and write the trace
-      // This blocks the Node process but ensures the trace file is complete
-      if (pid) {
-        try {
-          // Wait for the xctrace process to finish by polling its existence
-          execSync(`while kill -0 ${pid} 2>/dev/null; do sleep 0.5; done`, { timeout: 20000 });
-        } catch {
-          Logger.warn("xctrace: timeout waiting for process to exit");
-        }
-      }
-
-      // Extra safety margin for filesystem flush
-      execSync("sleep 1");
-    }
-
-    // Verify the trace file exists
-    if (fs.existsSync(this.tracePath)) {
-      const files = fs.readdirSync(this.tracePath);
-      Logger.info(`xctrace: trace saved at ${this.tracePath} (contents: ${files.join(", ")})`);
-    } else {
-      Logger.error(`xctrace: trace file not found at ${this.tracePath}`);
-    }
-
+  /**
+   * Start recording and block until complete. Returns the trace path.
+   */
+  recordSync(): string {
+    this.start();
     return this.tracePath;
   }
 
@@ -95,11 +82,11 @@ export class XCTraceRecorder {
     return this.tracePath;
   }
 
+  isComplete(): boolean {
+    return this.recordingComplete;
+  }
+
   cleanup(): void {
-    if (this.process) {
-      this.process.kill("SIGKILL");
-      this.process = null;
-    }
     if (fs.existsSync(this.tracePath)) {
       fs.rmSync(this.tracePath, { recursive: true });
     }
@@ -121,7 +108,6 @@ export const detectXCTraceDeviceId = (): string | null => {
         break;
       }
       if (inDevices && line.includes("(") && !line.includes("Mac")) {
-        // Match: iPhone von Tom (2) (26.3.1) (00008140-001409922EEB801C)
         const match = line.match(/\(([A-F0-9-]+)\)\s*$/);
         if (match) {
           Logger.info(`xctrace: detected physical device: ${match[1]}`);
