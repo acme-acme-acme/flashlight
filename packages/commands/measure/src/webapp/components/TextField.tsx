@@ -1,7 +1,8 @@
 import * as React from "react";
 import { styled, alpha } from "@mui/material/styles";
 import InputBase from "@mui/material/InputBase";
-import { AndroidRounded } from "@mui/icons-material";
+import { AndroidRounded, Apple } from "@mui/icons-material";
+import { DetectedPlatform } from "../../server/socket/socketInterface";
 
 const Search = styled("div")(({ theme }) => ({
   position: "relative",
@@ -36,17 +37,26 @@ const StyledInputBase = styled(InputBase)(({ theme }) => ({
   },
 }));
 
+const PlatformIcon = ({ platform }: { platform: DetectedPlatform }) => {
+  if (platform === "ios") {
+    return <Apple />;
+  }
+  return <AndroidRounded />;
+};
+
 export const TextField = ({
   onChange,
   value,
+  platform,
 }: {
   onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
   value: string;
+  platform: DetectedPlatform;
 }) => {
   return (
     <Search>
       <SearchIconWrapper>
-        <AndroidRounded />
+        <PlatformIcon platform={platform} />
       </SearchIconWrapper>
       <StyledInputBase placeholder="Fill in your app id" onChange={onChange} value={value} />
     </Search>

@@ -14,7 +14,7 @@
   },
   "license": "MIT",
   "dependencies": {
-    "@perf-profiler/ios-instruments": "^0.3.3",
+    "@perf-profiler/tpn": "^0.1.0",
     "@perf-profiler/logger": "^0.3.3",
     "@perf-profiler/types": "^0.8.0"
   }

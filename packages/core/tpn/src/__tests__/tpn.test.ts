@@ -1,11 +1,11 @@
-import { parseTPNLine, matchNavigationPairs } from "@perf-profiler/tpn";
+import { parseTPNLine, matchNavigationPairs } from "../index";
 
 describe("parseTPNLine", () => {
   it("returns null for non-TPN lines", () => {
     expect(parseTPNLine("I/ActivityManager: some random log")).toBeNull();
   });
 
-  it("parses a nav_start event", () => {
+  it("parses a nav_start event from Android logcat format", () => {
     const line =
       'I/ReactNativeJS: [FLASHLIGHT_TPN] {"event":"nav_start","from":"Home","to":"Profile","timestamp":1711929600123}';
     const result = parseTPNLine(line);
@@ -17,7 +17,7 @@ describe("parseTPNLine", () => {
     });
   });
 
-  it("parses a nav_end event", () => {
+  it("parses a nav_end event from Android logcat format", () => {
     const line =
       'I/ReactNativeJS: [FLASHLIGHT_TPN] {"event":"nav_end","to":"Profile","timestamp":1711929600456}';
     const result = parseTPNLine(line);
@@ -25,6 +25,18 @@ describe("parseTPNLine", () => {
       event: "nav_end",
       to: "Profile",
       timestamp: 1711929600456,
+    });
+  });
+
+  it("parses TPN events from iOS log stream format", () => {
+    const line =
+      '2026-04-01 12:00:00.000 Df com.facebook.react.log 0x1234 [FLASHLIGHT_TPN] {"event":"nav_start","from":"Home","to":"Settings","timestamp":1000}';
+    const result = parseTPNLine(line);
+    expect(result).toEqual({
+      event: "nav_start",
+      from: "Home",
+      to: "Settings",
+      timestamp: 1000,
     });
   });
 

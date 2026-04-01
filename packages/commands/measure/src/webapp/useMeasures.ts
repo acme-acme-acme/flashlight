@@ -14,6 +14,7 @@ export const useMeasures = () => {
   }, []);
 
   return {
+    platform: state?.platform ?? "android",
     bundleId: state?.bundleId ?? null,
     autodetect: () => {
       socket.emit(SocketEvents.AUTODETECT_BUNDLE_ID);

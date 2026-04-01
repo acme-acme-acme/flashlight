@@ -74,7 +74,9 @@ export const withNavigationTracker = <P extends NavigationContainerProps>(
           previousRouteRef.current = currentRoute;
         }
 
-        onStateChange?.(state);
+        if (typeof onStateChange === "function") {
+          onStateChange(state);
+        }
       },
       [onStateChange]
     );

@@ -1,4 +1,5 @@
 import { Measure, POLLING_INTERVAL } from "@perf-profiler/types";
+import { detectedPlatform } from "@perf-profiler/profiler";
 import { useState, useEffect } from "react";
 import { SocketType, SocketData, SocketEvents } from "./socketInterface";
 
@@ -7,6 +8,7 @@ export const useSocketState = (socket: SocketType) => {
     isMeasuring: false,
     bundleId: null,
     results: [],
+    platform: detectedPlatform === "ios" ? "ios" : "android",
   });
 
   const setState = (

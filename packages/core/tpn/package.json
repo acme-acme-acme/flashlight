@@ -1,0 +1,11 @@
+{
+  "name": "@perf-profiler/tpn",
+  "version": "0.1.0",
+  "description": "Shared TPN (Time Per Navigation) parsing logic",
+  "main": "dist/src/index.js",
+  "license": "MIT",
+  "dependencies": {
+    "@perf-profiler/logger": "^0.3.3",
+    "@perf-profiler/types": "^0.8.0"
+  }
+}
