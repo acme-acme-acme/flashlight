@@ -6,27 +6,11 @@ import {
   ScreenRecorder,
 } from "@perf-profiler/types";
 import { Logger } from "@perf-profiler/logger";
-import { ChildProcess, exec, execSync } from "child_process";
+import { execSync } from "child_process";
 import { detectIOSBundleId } from "./detectBundleId";
 import { IOSNavigationEventCollector, IOSDeviceType } from "./tpn/IOSNavigationEventCollector";
-
-interface AppMonitorData {
-  Pid: number;
-  Name: string;
-  CPU: string;
-  Memory: string;
-  DiskReads: string;
-  DiskWrites: string;
-  Threads: number;
-  Time: string;
-}
-
-interface FPSData {
-  currentTime: string;
-  fps: number;
-}
-
-type DataTypes = "cpu" | "fps";
+import { XCTraceRecorder, detectXCTraceDeviceId } from "./xctrace/XCTraceRecorder";
+import { parseTrace } from "./xctrace/XCTraceParser";
 
 const detectDeviceType = (): IOSDeviceType => {
   try {
@@ -64,49 +48,16 @@ const resolveSimulatorPid = (bundleId: string): number | null => {
 };
 
 export class IOSProfiler implements Profiler {
-  private measures: Record<string, Measure> = {};
-  private lastFPS: FPSData | null = null;
-  private lastCpu: AppMonitorData | null = null;
   private onMeasure: ((measure: Measure) => void) | undefined;
   private navigationCollector: IOSNavigationEventCollector | null = null;
   private deviceType: IOSDeviceType;
   private simulatorPollingInterval: ReturnType<typeof setInterval> | null = null;
+  private xctraceRecorder: XCTraceRecorder | null = null;
+  private currentBundleId: string | null = null;
 
   constructor() {
     this.deviceType = detectDeviceType();
   }
-
-  parseData = async (childProcess: ChildProcess, type: DataTypes) => {
-    childProcess?.stdout?.on("data", (data: Buffer) => {
-      const raw = data.toString();
-      Logger.debug(`iOS ${type} raw data: ${raw}`);
-      try {
-        const parsedData = JSON.parse(raw.replace(/'/g, '"'));
-        if (type === "cpu") {
-          (parsedData as AppMonitorData).Time = new Date().toISOString();
-          this.lastCpu = parsedData;
-          this.synchronizeData();
-        }
-        if (type === "fps") {
-          this.lastFPS = parsedData as FPSData;
-        }
-      } catch (error) {
-        Logger.debug(`iOS ${type} parse error: ${error}`);
-      }
-    });
-
-    childProcess?.stderr?.on("data", (data: Buffer) => {
-      Logger.warn(`iOS ${type} stderr: ${data.toString()}`);
-    });
-
-    childProcess?.on("error", (error) => {
-      Logger.error(`iOS ${type} process error: ${error.message}`);
-    });
-
-    childProcess?.on("exit", (code) => {
-      Logger.warn(`iOS ${type} process exited with code ${code}`);
-    });
-  };
 
   private emitMeasure = (cpu: number, ramKb: number) => {
     const tpnEvents = this.navigationCollector?.flush() ?? [];
@@ -125,7 +76,6 @@ export class IOSProfiler implements Profiler {
       ...(tpnEvents.length > 0 ? { tpn: tpnEvents } : {}),
     };
 
-    this.measures[measure.time] = measure;
     if (this.onMeasure) {
       this.onMeasure(measure);
     }
@@ -176,56 +126,48 @@ export class IOSProfiler implements Profiler {
   }
 
   private pollPhysicalDevice(bundleId: string): { stop: () => void } {
-    const cpuCmd = `pyidevice instruments appmonitor --format=flush -b ${bundleId} --time 500`;
-    const fpsCmd = `pyidevice instruments fps --format=flush --time 500`;
-    Logger.info(`iOS Physical Device CPU command: ${cpuCmd}`);
-    Logger.info(`iOS Physical Device FPS command: ${fpsCmd}`);
+    const deviceId = detectXCTraceDeviceId();
+    if (!deviceId) {
+      Logger.error(
+        "Could not detect physical iOS device for xctrace. Make sure a device is connected."
+      );
+      return { stop: () => {} };
+    }
 
-    const cpuAndMemoryPolling = exec(cpuCmd);
-    const fpsPolling = exec(fpsCmd);
+    this.xctraceRecorder = new XCTraceRecorder(deviceId);
+    this.xctraceRecorder.start();
 
-    this.parseData(cpuAndMemoryPolling, "cpu");
-    this.parseData(fpsPolling, "fps");
+    Logger.info(
+      `iOS Physical Device: xctrace recording started. Metrics will be available after stopping.`
+    );
 
     return {
       stop: () => {
-        cpuAndMemoryPolling.kill();
-        fpsPolling.kill();
+        if (!this.xctraceRecorder) return;
+
+        Logger.info("iOS Physical Device: stopping xctrace recording and parsing trace...");
+        const tracePath = this.xctraceRecorder.stop();
+
+        // Parse the trace and emit all measures retroactively
+        try {
+          const measures = parseTrace(tracePath, bundleId);
+          Logger.info(`iOS Physical Device: parsed ${measures.length} measures from trace`);
+
+          for (const measure of measures) {
+            if (this.onMeasure) {
+              this.onMeasure(measure);
+            }
+          }
+        } catch (error) {
+          Logger.error(`iOS Physical Device: failed to parse trace: ${error}`);
+        }
+
+        // Clean up trace file
+        this.xctraceRecorder.cleanup();
+        this.xctraceRecorder = null;
       },
     };
   }
-
-  createMeasure = (lastCpu: AppMonitorData, lastFps: FPSData) => {
-    const cpuMeasure = {
-      perName: { Total: parseFloat(lastCpu.CPU.replace(" %", "")) },
-      perCore: {},
-    };
-
-    const tpnEvents = this.navigationCollector?.flush() ?? [];
-    if (tpnEvents.length > 0) {
-      Logger.info(`iOS TPN flush: attaching ${tpnEvents.length} events to measure`);
-    }
-
-    const measure: Measure = {
-      cpu: cpuMeasure,
-      ram: parseFloat(lastCpu.Memory.replace(" MiB", "")),
-      fps: lastFps.fps,
-      time: new Date(lastCpu.Time).getTime(),
-      ...(tpnEvents.length > 0 ? { tpn: tpnEvents } : {}),
-    };
-    this.measures[measure.time] = measure;
-    if (this.onMeasure) {
-      this.onMeasure(measure);
-    }
-  };
-
-  synchronizeData = () => {
-    const lastCpu = this.lastCpu;
-    const lastFps = this.lastFPS;
-    if (lastCpu && lastFps) {
-      this.createMeasure(lastCpu, lastFps);
-    }
-  };
 
   pollPerformanceMeasures(bundleId: string, options: ProfilerPollingOptions): { stop: () => void } {
     this.onMeasure = options.onMeasure;
@@ -268,6 +210,10 @@ export class IOSProfiler implements Profiler {
       clearInterval(this.simulatorPollingInterval);
       this.simulatorPollingInterval = null;
     }
+    if (this.xctraceRecorder) {
+      this.xctraceRecorder.cleanup();
+      this.xctraceRecorder = null;
+    }
   };
 
   async stopApp(bundleId: string): Promise<void> {
@@ -275,7 +221,14 @@ export class IOSProfiler implements Profiler {
       if (this.deviceType === "simulator") {
         execSync(`xcrun simctl terminate booted ${bundleId}`);
       } else {
-        execSync(`pyidevice kill ${bundleId}`);
+        // Use devicectl for iOS 17+ physical devices
+        const deviceId = detectXCTraceDeviceId();
+        if (deviceId) {
+          execSync(
+            `devicectl device process terminate --device ${deviceId} --bundle-identifier ${bundleId}`,
+            { timeout: 10000 }
+          );
+        }
       }
     } catch (error) {
       Logger.debug(`Failed to stop app ${bundleId}: ${error}`);
