@@ -1,4 +1,4 @@
-import { parseTPNLine, matchNavigationPairs } from "../pollNavigationEvents";
+import { parseTPNLine, matchNavigationPairs } from "@perf-profiler/tpn";
 
 describe("parseTPNLine", () => {
   it("returns null for non-TPN lines", () => {
