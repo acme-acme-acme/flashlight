@@ -131,7 +131,7 @@ export const parseProcessData = (tracePath: string, bundleId: string): ProcessSn
     // 0:start, 1:process, 2:responsible-process, 3:duration, 4:pid, 5:uid,
     // 6:cpu-percent, 7:cpu-total, 8:thread-count, 9:mach-port-count,
     // 10:memory-physical-footprint, ...
-    const rows = parseXCTraceXml(xml, 27);
+    const rows = parseXCTraceXml(xml);
 
     // Find the process name that matches the bundleId
     // Process names in xctrace look like "MyApp (12345)"
@@ -187,7 +187,7 @@ export const parseFpsData = (tracePath: string): FPSSnapshot[] => {
     const xml = fs.readFileSync(xmlPath, "utf-8");
 
     // Schema: 0:interval, 1:period, 2:fps, 3:device-utilization
-    const rows = parseXCTraceXml(xml, 4);
+    const rows = parseXCTraceXml(xml);
 
     const snapshots: FPSSnapshot[] = [];
     for (const row of rows) {
