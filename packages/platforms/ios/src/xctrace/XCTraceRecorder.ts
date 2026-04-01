@@ -1,5 +1,5 @@
 import { Logger } from "@perf-profiler/logger";
-import { ChildProcess, execSync, spawnSync, spawn } from "child_process";
+import { ChildProcess, execSync, spawn } from "child_process";
 import os from "os";
 import path from "path";
 import fs from "fs";
@@ -8,7 +8,6 @@ export class XCTraceRecorder {
   private process: ChildProcess | null = null;
   private tracePath: string;
   private deviceId: string;
-  private processExited = false;
 
   constructor(deviceId: string) {
     this.deviceId = deviceId;
@@ -38,7 +37,6 @@ export class XCTraceRecorder {
     Logger.info(`xctrace: starting recording to ${this.tracePath}`);
     Logger.info(`xctrace: xctrace ${args.join(" ")}`);
 
-    this.processExited = false;
     this.process = spawn("xctrace", args, {
       stdio: ["pipe", "pipe", "pipe"],
     });
@@ -53,37 +51,39 @@ export class XCTraceRecorder {
 
     this.process.on("error", (error) => {
       Logger.error(`xctrace process error: ${error.message}`);
-      this.processExited = true;
     });
 
     this.process.on("exit", (code) => {
       Logger.info(`xctrace: recording stopped (exit code ${code})`);
-      this.processExited = true;
     });
   }
 
   stop(): string {
-    if (this.process && !this.processExited) {
-      Logger.info("xctrace: sending SIGINT to stop recording...");
+    if (this.process) {
+      const pid = this.process.pid;
+      Logger.info(`xctrace: sending SIGINT to PID ${pid} to stop recording...`);
       this.process.kill("SIGINT");
-
-      // Poll until the process exits or timeout after 15 seconds
-      const deadline = Date.now() + 15000;
-      while (!this.processExited && Date.now() < deadline) {
-        spawnSync("sleep", ["0.5"]);
-      }
-
-      if (!this.processExited) {
-        Logger.warn("xctrace: process did not exit after SIGINT, sending SIGKILL");
-        this.process.kill("SIGKILL");
-      }
-
       this.process = null;
+
+      // Use a synchronous subprocess to wait for xctrace to fully exit and write the trace
+      // This blocks the Node process but ensures the trace file is complete
+      if (pid) {
+        try {
+          // Wait for the xctrace process to finish by polling its existence
+          execSync(`while kill -0 ${pid} 2>/dev/null; do sleep 0.5; done`, { timeout: 20000 });
+        } catch {
+          Logger.warn("xctrace: timeout waiting for process to exit");
+        }
+      }
+
+      // Extra safety margin for filesystem flush
+      execSync("sleep 1");
     }
 
     // Verify the trace file exists
     if (fs.existsSync(this.tracePath)) {
-      Logger.info(`xctrace: trace saved at ${this.tracePath}`);
+      const files = fs.readdirSync(this.tracePath);
+      Logger.info(`xctrace: trace saved at ${this.tracePath} (contents: ${files.join(", ")})`);
     } else {
       Logger.error(`xctrace: trace file not found at ${this.tracePath}`);
     }
