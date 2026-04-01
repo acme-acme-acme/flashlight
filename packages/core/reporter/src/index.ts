@@ -7,3 +7,4 @@ export * from "./reporting/cpu";
 export * from "./reporting/ram";
 export * from "./reporting/fps";
 export { canComputeHighCpuUsage } from "./reporting/highCpu";
+export * from "./reporting/tpn";
