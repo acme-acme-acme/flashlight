@@ -18,9 +18,10 @@ export class IOSNavigationEventCollector {
   start(): void {
     const command =
       this.deviceType === "simulator"
-        ? `xcrun simctl spawn booted log stream --predicate 'subsystem == "com.facebook.react.log"'`
+        ? `xcrun simctl spawn booted log stream --level debug --predicate 'eventMessage CONTAINS "[FLASHLIGHT_TPN]"'`
         : "pyidevice syslog";
 
+    Logger.info(`iOS TPN: starting log stream (${this.deviceType}): ${command}`);
     this.process = exec(command);
 
     this.process.stdout?.on("data", (data: Buffer) => {
@@ -37,6 +38,20 @@ export class IOSNavigationEventCollector {
             this.pendingEvents = [];
           }
         }
+      }
+    });
+
+    this.process.stderr?.on("data", (data: Buffer) => {
+      Logger.warn(`iOS TPN stderr: ${data.toString()}`);
+    });
+
+    this.process.on("error", (error) => {
+      Logger.error(`iOS TPN process error: ${error.message}`);
+    });
+
+    this.process.on("exit", (code) => {
+      if (code !== null && code !== 0) {
+        Logger.warn(`iOS TPN process exited with code ${code}`);
       }
     });
   }
