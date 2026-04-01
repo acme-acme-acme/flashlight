@@ -19,6 +19,7 @@ import { FrameTimeParser } from "../atrace/pollFpsUsage";
 import { CppPerformanceMeasure, parseCppMeasure } from "../cppProfiler";
 import { processOutput } from "../cpu/getCpuStatsByProcess";
 import { processOutput as processRamOutput } from "../ram/pollRamUsage";
+import { NavigationEventCollector } from "../tpn/pollNavigationEvents";
 
 export const CppProfilerName = `BAMPerfProfiler`;
 
@@ -116,14 +117,19 @@ export abstract class UnixProfiler implements Profiler {
     let cpuMeasuresAggregator = new CpuMeasureAggregator(this.getCpuClockTick());
     let frameTimeParser = new FrameTimeParser();
 
+    const navigationCollector = new NavigationEventCollector();
+    navigationCollector.start();
+
     const reset = () => {
       initialTime = null;
       previousTime = null;
       cpuMeasuresAggregator = new CpuMeasureAggregator(this.getCpuClockTick());
       frameTimeParser = new FrameTimeParser();
+      navigationCollector.stop();
+      navigationCollector.start();
     };
 
-    return this.pollPerformanceMeasuresWeirdSubfunction(
+    const innerControl = this.pollPerformanceMeasuresWeirdSubfunction(
       bundleId,
       ({ pid, cpu, ram: ramStr, atrace, timestamp }) => {
         if (!atrace) {
@@ -165,17 +171,22 @@ export abstract class UnixProfiler implements Profiler {
             )
           );
 
+          const tpnEvents = navigationCollector.flush();
+          const tpn = tpnEvents.length > 0 ? tpnEvents : undefined;
+
           onMeasure(
             this.supportFPS()
               ? {
                   cpu: cpuMeasures,
                   fps,
                   ram,
+                  tpn,
                   time: timestamp - initialTime,
                 }
               : {
                   cpu: cpuMeasures,
                   ram,
+                  tpn,
                   time: timestamp - initialTime,
                 }
           );
@@ -190,6 +201,13 @@ export abstract class UnixProfiler implements Profiler {
         reset();
       }
     );
+
+    return {
+      stop: () => {
+        navigationCollector.stop();
+        innerControl.stop();
+      },
+    };
   }
 
   pollPerformanceMeasuresWeirdSubfunction = (
