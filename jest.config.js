@@ -29,6 +29,7 @@ const NODE_PACKAGES = [
   "plugins/eslint",
   "core/reporter",
   "core/shell",
+  "core/tpn",
   "commands/report",
   "plugins/navigation-tracker",
 ];
