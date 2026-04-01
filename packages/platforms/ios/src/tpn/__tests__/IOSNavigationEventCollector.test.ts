@@ -42,7 +42,7 @@ describe("IOSNavigationEventCollector", () => {
     const collector = new IOSNavigationEventCollector("device");
     collector.start();
 
-    expect(exec).toHaveBeenCalledWith(expect.stringContaining("pyidevice syslog"));
+    expect(exec).toHaveBeenCalledWith(expect.stringContaining("idevicesyslog"));
   });
 
   it("collects and flushes TPN events", () => {

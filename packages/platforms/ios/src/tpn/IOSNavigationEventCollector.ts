@@ -19,7 +19,7 @@ export class IOSNavigationEventCollector {
     const command =
       this.deviceType === "simulator"
         ? `xcrun simctl spawn booted log stream --level debug --predicate 'eventMessage CONTAINS "[FLASHLIGHT_TPN]"'`
-        : "pyidevice syslog";
+        : "idevicesyslog --match FLASHLIGHT_TPN";
 
     Logger.info(`iOS TPN: starting log stream (${this.deviceType}): ${command}`);
     this.process = exec(command);

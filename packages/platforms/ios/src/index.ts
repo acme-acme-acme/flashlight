@@ -12,7 +12,6 @@ import path from "path";
 import fs from "fs";
 import { detectIOSBundleId } from "./detectBundleId";
 import { IOSNavigationEventCollector, IOSDeviceType } from "./tpn/IOSNavigationEventCollector";
-import { MetroLogCollector } from "./tpn/MetroLogCollector";
 import { detectXCTraceDeviceId } from "./xctrace/XCTraceRecorder";
 import { parseTrace } from "./xctrace/XCTraceParser";
 
@@ -53,7 +52,6 @@ const resolveSimulatorPid = (bundleId: string): number | null => {
 export class IOSProfiler implements Profiler {
   private onMeasure: ((measure: Measure) => void) | undefined;
   private navigationCollector: IOSNavigationEventCollector | null = null;
-  private metroLogCollector: MetroLogCollector | null = null;
   private deviceType: IOSDeviceType;
   private simulatorPollingInterval: ReturnType<typeof setInterval> | null = null;
   private xctraceProcess: ChildProcess | null = null;
@@ -200,7 +198,7 @@ export class IOSProfiler implements Profiler {
         }
 
         // Attach TPN events from Metro log collector to the first measure
-        const tpnEvents = this.metroLogCollector?.flush() ?? [];
+        const tpnEvents = this.navigationCollector?.flush() ?? [];
         if (tpnEvents.length > 0) {
           Logger.info(`iOS Physical Device: attaching ${tpnEvents.length} TPN events from Metro`);
           if (measures.length > 0) {
@@ -241,14 +239,9 @@ export class IOSProfiler implements Profiler {
 
     Logger.info(`iOS: Starting performance polling for ${bundleId} (${this.deviceType})`);
 
-    // TPN collection: simulator uses iOS log stream, physical device uses Metro bundler logs
-    if (this.deviceType === "simulator") {
-      this.navigationCollector = new IOSNavigationEventCollector(this.deviceType);
-      this.navigationCollector.start();
-    } else {
-      this.metroLogCollector = new MetroLogCollector();
-      this.metroLogCollector.start();
-    }
+    // TPN collection: simulator uses iOS log stream, physical device uses idevicesyslog
+    this.navigationCollector = new IOSNavigationEventCollector(this.deviceType);
+    this.navigationCollector.start();
 
     const polling =
       this.deviceType === "simulator"
@@ -260,8 +253,6 @@ export class IOSProfiler implements Profiler {
         polling.stop();
         this.navigationCollector?.stop();
         this.navigationCollector = null;
-        this.metroLogCollector?.stop();
-        this.metroLogCollector = null;
       },
     };
   }
@@ -281,8 +272,6 @@ export class IOSProfiler implements Profiler {
   cleanup: () => void = () => {
     this.navigationCollector?.stop();
     this.navigationCollector = null;
-    this.metroLogCollector?.stop();
-    this.metroLogCollector = null;
     if (this.simulatorPollingInterval) {
       clearInterval(this.simulatorPollingInterval);
       this.simulatorPollingInterval = null;
